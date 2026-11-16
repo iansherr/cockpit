@@ -147,6 +147,8 @@ export function QuotaBars(quota, { id = "quota", compact = false } = {}) {
 // ---------------------------------------------------------------------------------------------------------------------
 // The model and its actions
 
+const LIVE_STAGE = { blocked: "needs_you", working: "working", done: "done", idle: "idle" };
+
 function stripSpinnerPrefix(raw) {
   return raw ? String(raw).replace(/^[\s·✢✳✶✻✽◐◓◑◒\u2800-\u28FF]+/, "").trim() : "";
 }
@@ -208,7 +210,6 @@ export class AgentsModel {
 
   /** The hub's rows joined with Herdr's live agents for clean titles and program info; falls back to Herdr's own agents if down. */
   get rows() {
-    const liveStageMap = { blocked: "needs_you", working: "working", done: "done", idle: "idle" };
     if (!this.down || this.value?.remote) {
       const rows = rowsOf(this.value);
       if (this.value?.remote) return rows;
@@ -216,7 +217,7 @@ export class AgentsModel {
       return rows.map((r) => {
         const addr = String(r.address ?? r.terminal ?? "").replace(/^app:/, "");
         const live = byAddr.get(addr);
-        const liveStage = live?.status ? liveStageMap[live.status] : null;
+        const liveStage = live?.status ? LIVE_STAGE[live.status] : null;
         const resolvedStage =
           r.stage === "needs_you" && liveStage && liveStage !== "needs_you" ? liveStage : r.stage;
         return {
@@ -233,7 +234,7 @@ export class AgentsModel {
     return agents().map((a) => ({
       terminal: `app:${a.address}`,
       address: a.address,
-      stage: liveStageMap[a.status] ?? "idle",
+      stage: LIVE_STAGE[a.status] ?? "idle",
       title: resolveAgentTitle(a, null, a.address),
       space: { id: a.space, name: a.space_name },
       tab: { id: a.tab, name: a.tab_name },
