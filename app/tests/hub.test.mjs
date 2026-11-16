@@ -62,12 +62,21 @@ async function fixture(t, remote = true, globals = {}, host = "127.0.0.1") {
       };
     } } },
   };
-  const module = new SourceTextModule(await readFile(new URL("../mods/cockpit/hub.js", import.meta.url), "utf8"), { context });
-  await module.link(name => new SyntheticModule(Object.keys(imports[name]), function () {
-    for (const [key, value] of Object.entries(imports[name])) this.setExport(key, value);
-  }, { context }));
-  await module.evaluate();
-  return { hub: module.namespace, calls, info, install, messages, clients, behavior, server, host };
+  const source = await readFile(new URL("../mods/cockpit/hub.js", import.meta.url), "utf8");
+  async function loadHub(identifier = "hub.js?v=1") {
+    const mod = new SourceTextModule(source, {
+      context,
+      identifier,
+      initializeImportMeta(meta, m) { meta.url = m.identifier; },
+    });
+    await mod.link(name => new SyntheticModule(Object.keys(imports[name]), function () {
+      for (const [key, value] of Object.entries(imports[name])) this.setExport(key, value);
+    }, { context }));
+    await mod.evaluate();
+    return mod.namespace;
+  }
+  const hub = await loadHub("hub.js?v=1");
+  return { hub, loadHub, calls, info, install, messages, clients, behavior, server, host };
 }
 
 test("a desktop reads the runner's discovery file and authenticates before requesting its inbox", async t => {
@@ -335,4 +344,23 @@ test("a notification that needs the runner's own terminals says so", async t => 
   const f = await fixture(t);
   await assert.rejects(f.hub.cockpit(["focus", "herdr-app:workspace:s1"]), /read-only/);
   await assert.rejects(f.hub.cockpit(["focus", "herdr-app:resume"]), /read-only/);
+});
+
+test("hot-reloading hub closes the previous generation's subscribe socket", async t => {
+  const f = await fixture(t), r1 = runtime(t), r2 = runtime(t);
+  const sub1 = f.hub.subscribe(r1.cx, { views: ["inbox"] }, r1.message);
+  t.after(() => sub1.stop());
+  await until(() => r1.received.length === 1);
+  assert.equal(f.clients.size, 1);
+
+  const hub2 = await f.loadHub("hub.js?v=2");
+  const sub2 = hub2.subscribe(r2.cx, { views: ["inbox"] }, r2.message);
+  t.after(() => sub2.stop());
+  await until(() => r2.received.length === 1);
+  await until(() => f.clients.size === 1);
+  assert.equal(f.clients.size, 1);
+
+  sub2.stop();
+  await until(() => f.clients.size === 0);
+  await Promise.all([...r1.tasks, ...r2.tasks]);
 });
