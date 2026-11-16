@@ -1032,6 +1032,28 @@ export function BarChart(id, { bars = [], height = 120, format = (v) => String(v
     );
 }
 
+function ringArcPath(c, r, strokePx, value) {
+  const v = Math.max(0, Math.min(1, value ?? 0));
+  if (v >= 0.999) {
+    return PathBuilder.stroke(strokePx)
+      .move_to(c, c - r)
+      .arc_to(r, r, 0, false, true, c, c + r)
+      .arc_to(r, r, 0, false, true, c, c - r);
+  }
+  const a = v * 2 * Math.PI;
+  const x = c + r * Math.sin(a);
+  const y = c - r * Math.cos(a);
+  if (a > Math.PI) {
+    return PathBuilder.stroke(strokePx)
+      .move_to(c, c - r)
+      .arc_to(r, r, 0, false, true, c, c + r)
+      .arc_to(r, r, 0, false, true, x, y);
+  }
+  return PathBuilder.stroke(strokePx)
+    .move_to(c, c - r)
+    .arc_to(r, r, 0, false, true, x, y);
+}
+
 /** A ring gauge, 0..1 filled, its text in the middle. */
 export function Ring(value, { size = 48, stroke = 5, color, label } = {}) {
   const k = tokens();
@@ -1039,14 +1061,43 @@ export function Ring(value, { size = 48, stroke = 5, color, label } = {}) {
   const v = Math.max(0, Math.min(1, value ?? 0));
   const r = ((size - stroke) / 2) * z;
   const c = (size / 2) * z;
-  const track = PathBuilder.stroke(stroke * z).move_to(c, c - r).arc_to(r, r, 0, false, true, c, c + r).arc_to(r, r, 0, false, true, c, c - r);
+  const track = ringArcPath(c, r, stroke * z, 1);
   let el = div().relative().size(size).flex_none().child(window.paint_path(track.build(), k.muted).absolute().inset_0());
   if (v > 0) {
-    const a = Math.min(v, 0.9999) * 2 * Math.PI;
-    const arc = PathBuilder.stroke(stroke * z).move_to(c, c - r).arc_to(r, r, 0, a > Math.PI, true, c + r * Math.sin(a), c - r * Math.cos(a));
+    const arc = ringArcPath(c, r, stroke * z, v);
     el = el.child(window.paint_path(arc.build(), color ?? k.ring).absolute().inset_0());
   }
   return el.child(h_flex().absolute().inset_0().items_center().justify_center().text_size(TEXT.xs).font_semibold().text_color(k.foreground).child(label ?? `${Math.round(v * 100)}%`));
+}
+
+/** Concentric dual ring gauge: outer = 5h (hourly), inner = 7d (weekly). */
+export function DualRing(outerValue, innerValue, { size = 44, outerStroke = 3.5, innerStroke = 3.5, outerColor, innerColor, label, center } = {}) {
+  const k = tokens();
+  const z = zoom();
+  const c = (size / 2) * z;
+  const rOut = ((size - outerStroke) / 2) * z;
+  const rIn = rOut - ((outerStroke + innerStroke) / 2 + 2) * z;
+  const trackColor = alpha(k.foreground, 0.14);
+  let el = div()
+    .relative()
+    .size(size)
+    .flex_none()
+    .child(window.paint_path(ringArcPath(c, rOut, outerStroke * z, 1).build(), trackColor).absolute().inset_0())
+    .child(window.paint_path(ringArcPath(c, rIn, innerStroke * z, 1).build(), trackColor).absolute().inset_0());
+  const vOut = Math.max(0, Math.min(1, outerValue ?? 0));
+  const vIn = Math.max(0, Math.min(1, innerValue ?? 0));
+  if (vOut > 0) {
+    el = el.child(window.paint_path(ringArcPath(c, rOut, outerStroke * z, vOut).build(), outerColor ?? k.ring).absolute().inset_0());
+  }
+  if (vIn > 0) {
+    el = el.child(window.paint_path(ringArcPath(c, rIn, innerStroke * z, vIn).build(), innerColor ?? k.ring).absolute().inset_0());
+  }
+  if (center != null) {
+    el = el.child(h_flex().absolute().top(0).left(0).size(size).items_center().justify_center().child(center));
+  } else if (label != null) {
+    el = el.child(h_flex().absolute().top(0).left(0).size(size).items_center().justify_center().text_size(10).font_semibold().text_color(k.foreground).child(label));
+  }
+  return el;
 }
 
 /** A progress bar (shadcn's <Progress>): 0..1 of its width, 6px high. */
