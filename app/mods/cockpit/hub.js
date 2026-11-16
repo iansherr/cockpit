@@ -267,6 +267,13 @@ export const history = async (kind, key) => (await request("history", { kind, ke
  */
 export function subscribe(cx, { views = [], docs = [], notify = false, focus = null }, onMessage, onState = () => {}) {
   const state = { stopped: false };
+  const subKey = JSON.stringify({ views, docs, notify, focus });
+  const modGen = import.meta.url;
+  const subs = (globalThis.cockpitSubsByKey ??= new Map());
+  const prev = subs.get(subKey);
+  if (prev && prev.modGen !== modGen) {
+    try { prev.stop(); } catch {}
+  }
   const navigation = (globalThis.cockpitRemoteFocus ??= { targets: new Map(), listeners: new Set() });
   const ready = new Set();
   const focused = target => {
@@ -329,11 +336,15 @@ export function subscribe(cx, { views = [], docs = [], notify = false, focus = n
       wait = Math.min(wait * 2, 5000);
     }
   });
-  return {
+  const handle = {
+    modGen,
     stop() {
       state.stopped = true;
       navigation.listeners.delete(focused);
       close(state.socket);
+      if (subs.get(subKey) === handle) subs.delete(subKey);
     },
   };
+  subs.set(subKey, handle);
+  return handle;
 }
