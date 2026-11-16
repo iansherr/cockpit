@@ -8,7 +8,7 @@ import { div, svg, PathBuilder, Background } from "gpui-kit";
 import { h_flex, v_flex, Input, HoverCard as BaseHoverCard } from "gpui-base";
 import { theme, settings, openOverlay } from "herdr";
 
-export const RADIUS = { sm: 4, md: 6, lg: 8, xl: 12 };
+export const RADIUS = { sm: 4, md: 6, lg: 8, xl: 12, full: 9999 };
 export const TEXT = { xs: 11, sm: 12, base: 13, lg: 15, xl: 18 };
 
 /** The kit's color tokens, shadcn's names on Herdr's theme. */
@@ -1032,6 +1032,28 @@ export function BarChart(id, { bars = [], height = 120, format = (v) => String(v
     );
 }
 
+function ringArcPath(c, r, strokePx, value) {
+  const v = Math.max(0, Math.min(1, value ?? 0));
+  if (v >= 0.999) {
+    return PathBuilder.stroke(strokePx)
+      .move_to(c, c - r)
+      .arc_to(r, r, 0, false, true, c, c + r)
+      .arc_to(r, r, 0, false, true, c, c - r);
+  }
+  const a = v * 2 * Math.PI;
+  const x = c + r * Math.sin(a);
+  const y = c - r * Math.cos(a);
+  if (a > Math.PI) {
+    return PathBuilder.stroke(strokePx)
+      .move_to(c, c - r)
+      .arc_to(r, r, 0, false, true, c, c + r)
+      .arc_to(r, r, 0, false, true, x, y);
+  }
+  return PathBuilder.stroke(strokePx)
+    .move_to(c, c - r)
+    .arc_to(r, r, 0, false, true, x, y);
+}
+
 /** A ring gauge, 0..1 filled, its text in the middle. */
 export function Ring(value, { size = 48, stroke = 5, color, label } = {}) {
   const k = tokens();
@@ -1039,11 +1061,10 @@ export function Ring(value, { size = 48, stroke = 5, color, label } = {}) {
   const v = Math.max(0, Math.min(1, value ?? 0));
   const r = ((size - stroke) / 2) * z;
   const c = (size / 2) * z;
-  const track = PathBuilder.stroke(stroke * z).move_to(c, c - r).arc_to(r, r, 0, false, true, c, c + r).arc_to(r, r, 0, false, true, c, c - r);
+  const track = ringArcPath(c, r, stroke * z, 1);
   let el = div().relative().size(size).flex_none().child(window.paint_path(track.build(), k.muted).absolute().inset_0());
   if (v > 0) {
-    const a = Math.min(v, 0.9999) * 2 * Math.PI;
-    const arc = PathBuilder.stroke(stroke * z).move_to(c, c - r).arc_to(r, r, 0, a > Math.PI, true, c + r * Math.sin(a), c - r * Math.cos(a));
+    const arc = ringArcPath(c, r, stroke * z, v);
     el = el.child(window.paint_path(arc.build(), color ?? k.ring).absolute().inset_0());
   }
   return el.child(h_flex().absolute().inset_0().items_center().justify_center().text_size(TEXT.xs).font_semibold().text_color(k.foreground).child(label ?? `${Math.round(v * 100)}%`));
