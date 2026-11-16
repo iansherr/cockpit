@@ -62,12 +62,17 @@ async function fixture(t, remote = true, globals = {}, host = "127.0.0.1") {
       };
     } } },
   };
-  const module = new SourceTextModule(await readFile(new URL("../mods/cockpit/hub.js", import.meta.url), "utf8"), { context });
-  await module.link(name => new SyntheticModule(Object.keys(imports[name]), function () {
-    for (const [key, value] of Object.entries(imports[name])) this.setExport(key, value);
-  }, { context }));
-  await module.evaluate();
-  return { hub: module.namespace, calls, info, install, messages, clients, behavior, server, host };
+  const source = await readFile(new URL("../mods/cockpit/hub.js", import.meta.url), "utf8");
+  async function loadHub(identifier = "hub.js?v=1") {
+    const mod = new SourceTextModule(source, { context, identifier });
+    await mod.link(name => new SyntheticModule(Object.keys(imports[name]), function () {
+      for (const [key, value] of Object.entries(imports[name])) this.setExport(key, value);
+    }, { context }));
+    await mod.evaluate();
+    return mod.namespace;
+  }
+  const hub = await loadHub("hub.js?v=1");
+  return { hub, loadHub, calls, info, install, messages, clients, behavior, server, host };
 }
 
 test("a desktop reads the runner's discovery file and authenticates before requesting its inbox", async t => {
