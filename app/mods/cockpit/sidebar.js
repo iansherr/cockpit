@@ -25,6 +25,13 @@ const APPS = {
   mail: { label: "Mail", icon: "mail", key: "⌘⌥7" },
 };
 const DEFAULT_SPACES = ["inbox", "terminal", "actions", "to-do", "runbook", "meetings"];
+const AGENT_TYPE_RE = /codex|agy|antigravity|claude|opencode/i;
+const AGENT_TYPES = {
+  codex: { label: "Codex", tone: "success" },
+  agy: { label: "AGY", tone: "info" },
+  claude: { label: "Claude", tone: "destructive" },
+  opencode: { label: "OpenCode", tone: "warning" },
+};
 
 /** An app's bubble from its view: what waits on you there, {count, tone} or null. */
 function appBadge(app, v) {
@@ -443,15 +450,11 @@ export default class Sidebar {
     const pinned = this.agents.pins.includes(r.terminal);
     const focusedNow = focused()?.terminal === r.address;
     const rawProgram = r.program?.key || r.program?.name || r.program?.title || r.app || r.agent || "";
-    const match = /codex|agy|antigravity|claude|opencode/i.exec(rawProgram);
-    const agentType = match ? (match[0].toLowerCase() === "antigravity" ? "agy" : match[0].toLowerCase()) : "unknown";
-    const typeColor = {
-      codex: k.success,
-      agy: k.info,
-      claude: k.destructive,
-      opencode: k.warning,
-    }[agentType] ?? k.mutedFg;
-    const typeLabel = { codex: "Codex", agy: "AGY", claude: "Claude", opencode: "OpenCode" }[agentType] ?? null;
+    const match = AGENT_TYPE_RE.exec(rawProgram);
+    const agentKey = match ? (match[0].toLowerCase() === "antigravity" ? "agy" : match[0].toLowerCase()) : "unknown";
+    const meta = AGENT_TYPES[agentKey];
+    const typeColor = meta ? k[meta.tone] : k.mutedFg;
+    const typeLabel = meta?.label ?? null;
     const contextPct = r.context ?? 0;
     const rawCwd = r.cwd || r.dir || "";
     const shortPath = rawCwd ? rawCwd.replace(/^\/Users\/[^/]+/, "~") : r.space?.name || "";
