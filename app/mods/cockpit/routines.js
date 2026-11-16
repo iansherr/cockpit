@@ -271,6 +271,14 @@ export default class Routines {
 
   run(a, cx) {
     if (a.id === "edit") return this.openForm(cx, a.args[0]);
+    if (a.id === "open") {
+      const [slug, id] = a.args ?? [];
+      const entry = slug && id ? this.entry(`${slug}/run/${id}`) : null;
+      if (entry?.output) {
+        openReader({ path: entry.output, title: entry.name || `${slug} run ${id}` });
+        return;
+      }
+    }
     if (a.confirm) {
       this.confirm = a;
       cx.notify();
