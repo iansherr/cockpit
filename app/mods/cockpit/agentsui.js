@@ -36,8 +36,8 @@ export function stageAge(row, now = Date.now()) {
 }
 
 /** The stage's mark: a breathing dot while it needs you, a spinner while it works, a ring at rest. */
-export function StageMark(id, stage, { size = 8 } = {}) {
-  const c = stageColor(stage);
+export function StageMark(id, stage, { size = 8, color = null } = {}) {
+  const c = color ?? stageColor(stage);
   if (stage === "working") return Spinner({ size: size + 4, color: c });
   if (stage === "snoozed") return Icon("alarm-clock", { size: size + 4, color: c });
   if (stage === "merged") return Icon("git-merge", { size: size + 4, color: c });

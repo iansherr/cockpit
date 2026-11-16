@@ -442,17 +442,38 @@ export default class Sidebar {
     const hovered = this.hover.is(id);
     const pinned = this.agents.pins.includes(r.terminal);
     const focusedNow = focused()?.terminal === r.address;
-    const parts = [];
-    if (r.ci?.state === "fail") parts.push(div().text_color(k.destructive).child(r.ci.label));
-    else if (r.ci?.state === "running") parts.push(div().text_color(k.working).child(r.ci.label));
-    if (r.pr) parts.push(div().child(`#${r.pr.number}${r.pr.review === "APPROVED" ? " approved" : r.pr.review === "CHANGES_REQUESTED" ? " changes asked" : ""}`));
-    if (r.changes?.files) parts.push(h_flex().gap(3).child(div().text_color(k.success).child(`+${r.changes.add}`)).child(div().text_color(k.destructive).child(`−${r.changes.del}`)));
-    if (!parts.length && r.said) parts.push(div().min_w(0).truncate().italic().child(r.said));
+    const rawProgram = r.program?.key || r.program?.name || r.program?.title || r.app || r.agent || "";
+    const match = /codex|agy|antigravity|claude|opencode/i.exec(rawProgram);
+    const agentType = match ? (match[0].toLowerCase() === "antigravity" ? "agy" : match[0].toLowerCase()) : "unknown";
+    const typeColor = {
+      codex: k.success,
+      agy: k.info,
+      claude: k.destructive,
+      opencode: k.warning,
+    }[agentType] ?? k.mutedFg;
+    const typeLabel = { codex: "Codex", agy: "AGY", claude: "Claude", opencode: "OpenCode" }[agentType] ?? null;
+    const contextPct = r.context ?? 0;
+    const rawCwd = r.cwd || r.dir || "";
+    const shortPath = rawCwd ? rawCwd.replace(/^\/Users\/[^/]+/, "~") : r.space?.name || "";
+    const rightMeta = [];
+    if (r.ci?.state === "fail") rightMeta.push(div().text_color(k.destructive).child(r.ci.label));
+    else if (r.ci?.state === "running") rightMeta.push(div().text_color(k.working).child(r.ci.label));
+    if (r.pr) rightMeta.push(div().text_color(alpha(k.foreground, 0.72)).child(`#${r.pr.number}`));
+    if (r.changes?.files) {
+      rightMeta.push(
+        h_flex()
+          .gap(3)
+          .font_family("JetBrains Mono")
+          .child(div().text_color(k.success).child(`+${r.changes.add}`))
+          .child(div().text_color(k.destructive).child(`−${r.changes.del}`)),
+      );
+    }
+    const leftMeta = shortPath || (!rightMeta.length && r.said ? r.said : "");
     const flash = this.flashes.of(r.terminal);
     const row = h_flex()
       .id(id)
       .relative()
-      .min_h(parts.length ? 42 : 30)
+      .min_h(42)
       .py(4)
       .pl(8 + indent)
       .pr(8)
@@ -467,14 +488,45 @@ export default class Sidebar {
       )
       .on_click((_e, cx) => this.agents.go(cx, r))
       .on_mouse_down("right", () => this.agents.menu(r))
-      .child(h_flex().w(14).flex_none().justify_center().child(StageMark(id, r.stage)))
+      .child(h_flex().w(14).flex_none().justify_center().child(StageMark(id, r.stage, { color: typeColor })))
       .child(
         v_flex()
           .flex_1()
           .min_w(0)
           .gap(1)
-          .child(div().truncate().text_size(TEXT.base).text_color(r.stage === "idle" || r.stage === "merged" ? k.mutedFg : k.foreground).child(r.title || r.tab?.name || r.address))
-          .when(parts.length > 0, (e) => e.child(h_flex().min_w(0).gap(6).text_size(TEXT.xs).text_color(k.mutedFg).children(parts))),
+          .child(
+            h_flex()
+              .gap(4)
+              .items_center()
+              .when(Boolean(typeLabel), (e) =>
+                e
+                  .child(div().flex_none().text_size(TEXT.xs).font_medium().text_color(typeColor).child(typeLabel))
+                  .child(div().flex_none().text_size(TEXT.xs).text_color(k.dim).child("|")),
+              )
+              .child(
+                div()
+                  .truncate()
+                  .text_size(TEXT.base)
+                  .text_color(r.stage === "merged" ? k.mutedFg : r.stage === "idle" ? alpha(k.foreground, 0.88) : k.foreground)
+                  .child(r.title || r.address),
+              )
+              .when(Boolean(contextPct > 0), (e) =>
+                e.child(div().flex_none().text_size(TEXT.xs).text_color(alpha(k.foreground, 0.72)).child(`· ${Math.round(contextPct)}%`)),
+              ),
+          )
+          .when(Boolean(leftMeta) || rightMeta.length > 0, (e) =>
+            e.child(
+              h_flex()
+                .w_full()
+                .min_w(0)
+                .items_center()
+                .justify_between()
+                .gap(6)
+                .text_size(TEXT.xs)
+                .child(div().flex_1().min_w(0).truncate().text_color(alpha(k.foreground, 0.65)).child(leftMeta))
+                .when(rightMeta.length > 0, (el) => el.child(h_flex().flex_none().gap(5).items_center().children(rightMeta))),
+            ),
+          ),
       )
       .when(hovered, (e) =>
         e.child(
@@ -488,7 +540,7 @@ export default class Sidebar {
       .when(!hovered, (e) =>
         e
           .when(Boolean(r.unread), (el) => el.child(div().size(6).flex_none().rounded(3).bg(stageColor(r.stage))))
-          .child(div().flex_none().text_size(TEXT.xs).text_color(r.stage === "snoozed" ? k.info : k.dim).child(r.stage === "snoozed" ? r.snoozed?.label?.replace("until ", "") ?? "" : dur(now - (r.since ?? now)))),
+          .child(div().flex_none().text_size(TEXT.xs).text_color(r.stage === "snoozed" ? k.info : alpha(k.foreground, 0.62)).child(r.stage === "snoozed" ? r.snoozed?.label?.replace("until ", "") ?? "" : dur(now - (r.since ?? now)))),
       );
     const tracked = this.hover.track(row, id);
     const recap = r.recap?.text;
