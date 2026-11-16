@@ -147,6 +147,22 @@ export function QuotaBars(quota, { id = "quota", compact = false } = {}) {
 // ---------------------------------------------------------------------------------------------------------------------
 // The model and its actions
 
+function stripSpinnerPrefix(raw) {
+  return raw ? String(raw).replace(/^[\s·✢✳✶✻✽◐◓◑◒\u2800-\u28FF]+/, "").trim() : "";
+}
+
+function resolveAgentTitle(live, r, addr) {
+  const stripped = stripSpinnerPrefix(live?.terminal_title_stripped || live?.title);
+  const tabName = live?.tab_name ?? r?.tab?.name;
+  return (
+    (stripped && !/^\d+$/.test(stripped) ? stripped : null) ??
+    r?.task ??
+    (tabName && !/^\d+$/.test(tabName) ? tabName : null) ??
+    r?.title ??
+    addr
+  );
+}
+
 /** Follows the agents view and runs its actions; one per view that draws agents. */
 export class AgentsModel {
   constructor() {
@@ -190,17 +206,39 @@ export class AgentsModel {
     this.sub?.stop();
   }
 
-  /** The hub's rows; while it doesn't answer, Herdr's own agents (status, title, place), so none vanishes. */
+  /** The hub's rows joined with Herdr's live agents for clean titles and program info; falls back to Herdr's own agents if down. */
   get rows() {
-    if (!this.down || this.value?.remote) return rowsOf(this.value);
-    const stage = { blocked: "needs_you", working: "working", done: "done", idle: "idle" };
+    const liveStageMap = { blocked: "needs_you", working: "working", done: "done", idle: "idle" };
+    if (!this.down || this.value?.remote) {
+      const rows = rowsOf(this.value);
+      if (this.value?.remote) return rows;
+      const byAddr = new Map(agents().map((a) => [a.address, a]));
+      return rows.map((r) => {
+        const addr = String(r.address ?? r.terminal ?? "").replace(/^app:/, "");
+        const live = byAddr.get(addr);
+        const liveStage = live?.status ? liveStageMap[live.status] : null;
+        const resolvedStage =
+          r.stage === "needs_you" && liveStage && liveStage !== "needs_you" ? liveStage : r.stage;
+        return {
+          ...r,
+          stage: resolvedStage,
+          question: resolvedStage === "needs_you" ? r.question : null,
+          title: resolveAgentTitle(live, r, addr),
+          cwd: r.cwd ?? live?.cwd ?? null,
+          program: live?.program ?? r.program,
+          app: live?.app ?? r.app,
+        };
+      });
+    }
     return agents().map((a) => ({
       terminal: `app:${a.address}`,
       address: a.address,
-      stage: stage[a.status] ?? "idle",
-      title: a.tab_name && !/^\d+$/.test(a.tab_name) ? a.tab_name : a.title || a.address,
+      stage: liveStageMap[a.status] ?? "idle",
+      title: resolveAgentTitle(a, null, a.address),
       space: { id: a.space, name: a.space_name },
       tab: { id: a.tab, name: a.tab_name },
+      program: a.program,
+      app: a.app,
       herdr: true,
     }));
   }
