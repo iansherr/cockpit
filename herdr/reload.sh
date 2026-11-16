@@ -92,15 +92,17 @@ if command -v "$H" >/dev/null 2>&1; then
     fi
   done
 
-  # Fallback to heartbeat panes if herdr CLI list didn't yield them (or for panes in heartbeat cache)
-  candidates="$behind"
-  if [ "$force" = true ]; then
-    candidates="$all_heartbeat_panes"
+  # Fallback to heartbeat panes when not filtering by --idle (heartbeats don't track idle/working status)
+  if [ "$idle_only" = false ]; then
+    candidates="$behind"
+    if [ "$force" = true ]; then
+      candidates="$all_heartbeat_panes"
+    fi
+    for pane in $candidates; do
+      [ -n "$pane" ] || continue
+      send_to_pane "$pane"
+    done
   fi
-  for pane in $candidates; do
-    [ -n "$pane" ] || continue
-    send_to_pane "$pane"
-  done
 fi
 
 if command -v herdr-app >/dev/null 2>&1 && [ -S "$app_home/herdr-app.sock" ]; then
