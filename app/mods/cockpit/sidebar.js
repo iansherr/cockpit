@@ -13,7 +13,7 @@ import { deliver, follow } from "./notify.js";
 import { rowsOf } from "./fleet.js";
 import { openUpdate, pending as pendingUpdate } from "./update.js";
 import { tokens, alpha, TEXT, RADIUS, Icon, Kbd, Button, SectionHeader, StageHeading, HoverCard, Hover, Flashes, CornerCount, dur } from "./ui.js";
-import { AgentsModel, QuestionCard, QuotaBars, QuotaRings, StageMark, Chips, STAGES, stageColor, stageAge, hours } from "./agentsui.js";
+import { AgentsModel, QuestionCard, QuotaRings, StageMark, Chips, STAGES, stageColor, stageAge, hours } from "./agentsui.js";
 
 const APPS = {
   inbox: { label: "Inbox", icon: "inbox", key: "⌘⌥1" },
@@ -325,11 +325,14 @@ export default class Sidebar {
         const q5h = q.find((x) => x.name === "5h");
         const q7d = q.find((x) => x.name === "7d");
         const pl = this.providerLimits ?? {};
-        const utcMidnight = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1);
         const resolveColor = (c) => (c && k[c] ? k[c] : c || k.ring);
         const providers = (this.quotaRingsConfig ?? DEFAULT_QUOTA_RINGS).map((cfg) => {
           const entry = cfg.key === "openrouter" ? (pl.openrouter ?? pl.opencode ?? {}) : (pl[cfg.key] ?? {});
           const isClaude = cfg.key === "claude";
+          const fallbackReset5h =
+            entry.freeLimit != null
+              ? Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1)
+              : null;
           return {
             key: cfg.key,
             name: cfg.name ?? cfg.key,
@@ -337,7 +340,7 @@ export default class Sidebar {
             color: resolveColor(cfg.color),
             p5h: (isClaude ? q5h?.percent : null) ?? entry.p5h ?? null,
             p7d: (isClaude ? q7d?.percent : null) ?? entry.p7d ?? null,
-            resets5h: (isClaude ? q5h?.resets_at : null) ?? entry.resets5h ?? (entry.freeLimit != null ? utcMidnight : null),
+            resets5h: (isClaude ? q5h?.resets_at : null) ?? entry.resets5h ?? fallbackReset5h,
             resets7d: (isClaude ? q7d?.resets_at : null) ?? entry.resets7d ?? null,
             freeUsed: entry.freeUsed ?? null,
             freeLimit: entry.freeLimit ?? null,
