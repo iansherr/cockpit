@@ -13,7 +13,7 @@ import { deliver, follow } from "./notify.js";
 import { rowsOf } from "./fleet.js";
 import { openUpdate, pending as pendingUpdate } from "./update.js";
 import { tokens, alpha, TEXT, RADIUS, Icon, Kbd, Button, SectionHeader, StageHeading, HoverCard, Hover, Flashes, CornerCount, dur } from "./ui.js";
-import { AgentsModel, QuestionCard, QuotaBars, StageMark, Chips, STAGES, stageColor, stageAge, hours } from "./agentsui.js";
+import { AgentsModel, QuestionCard, QuotaBars, QuotaRings, StageMark, Chips, STAGES, stageColor, stageAge, hours } from "./agentsui.js";
 
 const APPS = {
   inbox: { label: "Inbox", icon: "inbox", key: "⌘⌥1" },
@@ -25,6 +25,14 @@ const APPS = {
   mail: { label: "Mail", icon: "mail", key: "⌘⌥7" },
 };
 const DEFAULT_SPACES = ["inbox", "terminal", "actions", "to-do", "runbook", "meetings"];
+
+/** Configurable quota ring slots; override via <cache>/quota-rings.json. */
+const DEFAULT_QUOTA_RINGS = [
+  { key: "claude", name: "Claude", icon: "logo-claude", color: "#D97757" },
+  { key: "codex", name: "Codex", icon: "logo-codex", color: "success" },
+  { key: "agy", name: "AGY", icon: "logo-agy", color: "info" },
+  { key: "openrouter", name: "OpenRouter (Free)", icon: "logo-opencode", color: "warning" },
+];
 
 /** An app's bubble from its view: what waits on you there, {count, tone} or null. */
 function appBadge(app, v) {
@@ -69,7 +77,11 @@ export default class Sidebar {
     this.folded = new Set();
     this.repos = new Map();
     this.machineList = [];
+    this.providerLimits = {};
+    this.quotaRingsConfig = DEFAULT_QUOTA_RINGS;
+    this.providerLimitsAt = 0;
     this.refreshMachines(cx);
+    this.loadProviderLimits(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     this.drag = null;
     this.update = null;
@@ -83,6 +95,7 @@ export default class Sidebar {
         const text = (await readTextFile(`${cache}/config.json`)) ?? (await readTextFile(`${home}/.config/cockpit/config.json`));
         const pinned = text ? JSON.parse(text).spaces : null;
         if (Array.isArray(pinned)) this.spaces = pinned.map((s) => (typeof s === "string" ? s : s.name));
+        await this.loadProviderLimits(cx);
       } catch {}
       cx.notify();
     });
@@ -134,6 +147,7 @@ export default class Sidebar {
 
   /** The agents view arrived: rows whose stage moved flash in its color. */
   agentsChanged(value, before, cx) {
+    if (Date.now() - (this.providerLimitsAt ?? 0) > 30000) this.loadProviderLimits(cx);
     const was = new Map(rowsOf(before).map((r) => [r.terminal, r.stage]));
     for (const r of rowsOf(value)) if (was.has(r.terminal) && was.get(r.terminal) !== r.stage) this.flashes.start(cx, r.terminal, stageColor(r.stage));
   }
@@ -162,6 +176,45 @@ export default class Sidebar {
       } catch {}
       cx.notify();
     });
+  }
+
+  /** Reads <cache>/provider-limits.json, <cache>/limits.json, and optional quota-rings.json directly (zero subprocesses). */
+  async loadProviderLimits(cx) {
+    this.providerLimitsAt = Date.now();
+    const cacheDir = this.install?.cache ?? (await hub.install().catch(() => null))?.cache;
+    if (!cacheDir) return;
+    try {
+      const raw = await readTextFile(`${cacheDir}/provider-limits.json`);
+      if (raw) this.providerLimits = JSON.parse(raw) ?? {};
+    } catch {}
+    try {
+      const limRaw = await readTextFile(`${cacheDir}/limits.json`);
+      if (limRaw) {
+        const lim = JSON.parse(limRaw);
+        const list = lim?.limits ?? [];
+        const l5 = list.find((x) => x.name === "5h");
+        const l7 = list.find((x) => x.name === "7d");
+        if (l5 || l7) {
+          this.providerLimits = {
+            ...this.providerLimits,
+            claude: {
+              p5h: l5?.percent ?? null,
+              p7d: l7?.percent ?? null,
+              resets5h: l5?.resetsAt ? Date.parse(l5.resetsAt) : null,
+              resets7d: l7?.resetsAt ? Date.parse(l7.resetsAt) : null,
+            },
+          };
+        }
+      }
+    } catch {}
+    try {
+      const cfgRaw = await readTextFile(`${cacheDir}/quota-rings.json`);
+      if (cfgRaw) {
+        const parsed = JSON.parse(cfgRaw);
+        if (Array.isArray(parsed) && parsed.length) this.quotaRingsConfig = parsed;
+      }
+    } catch {}
+    cx?.notify();
   }
 
   render(cx) {
@@ -267,9 +320,40 @@ export default class Sidebar {
             .child(Kbd("⌘⇧P")),
         ),
       )
-      .when(!rail && Boolean(model.value?.quota?.length), (e) =>
-        e.child(div().id("quota-box").mb(8).px(4).cursor_pointer().on_click(() => this.openRecap("time")).child(QuotaBars(model.value.quota, { compact: true }))),
-      )
+      .when(!rail, (e) => {
+        const q = model.value?.quota ?? [];
+        const q5h = q.find((x) => x.name === "5h");
+        const q7d = q.find((x) => x.name === "7d");
+        const pl = this.providerLimits ?? {};
+        const utcMidnight = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1);
+        const resolveColor = (c) => (c && k[c] ? k[c] : c || k.ring);
+        const providers = (this.quotaRingsConfig ?? DEFAULT_QUOTA_RINGS).map((cfg) => {
+          const entry = cfg.key === "openrouter" ? (pl.openrouter ?? pl.opencode ?? {}) : (pl[cfg.key] ?? {});
+          const isClaude = cfg.key === "claude";
+          return {
+            key: cfg.key,
+            name: cfg.name ?? cfg.key,
+            icon: cfg.icon ?? "circle",
+            color: resolveColor(cfg.color),
+            p5h: (isClaude ? q5h?.percent : null) ?? entry.p5h ?? null,
+            p7d: (isClaude ? q7d?.percent : null) ?? entry.p7d ?? null,
+            resets5h: (isClaude ? q5h?.resets_at : null) ?? entry.resets5h ?? (entry.freeLimit != null ? utcMidnight : null),
+            resets7d: (isClaude ? q7d?.resets_at : null) ?? entry.resets7d ?? null,
+            freeUsed: entry.freeUsed ?? null,
+            freeLimit: entry.freeLimit ?? null,
+            freeRemaining: entry.freeRemaining ?? null,
+          };
+        });
+        return e.child(
+          div()
+            .id("quota-box")
+            .mb(8)
+            .px(4)
+            .cursor_pointer()
+            .on_click(() => this.openRecap("time"))
+            .child(QuotaRings(providers)),
+        );
+      })
       .when(rail, (e) =>
         e
           .child(navItem("home", "Home", "layout-dashboard", counts.unread || null, "⌘⌥0", counts.needs_you ? k.blocked : null))

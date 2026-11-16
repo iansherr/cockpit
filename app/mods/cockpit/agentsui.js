@@ -7,7 +7,7 @@ import { h_flex, v_flex, InputState } from "gpui-base";
 import { run, notify, openOverlay, agents } from "herdr";
 import * as hub from "./hub.js";
 import { rowsOf } from "./fleet.js";
-import { tokens, alpha, TEXT, RADIUS, Icon, Spinner, Kbd, Button, Checkbox, Chip, Mono, TextField, dur, openMenu } from "./ui.js";
+import { tokens, alpha, TEXT, RADIUS, Icon, Spinner, Ring, DualRing, Kbd, Button, Checkbox, Chip, Mono, TextField, dur, openMenu } from "./ui.js";
 
 /** Each stage: its label, color token and mark. Whose move it is, yours first. */
 export const STAGES = {
@@ -139,6 +139,74 @@ export function QuotaBars(quota, { id = "quota", compact = false } = {}) {
               .text_color(q.ahead || p >= 80 ? tone : k.mutedFg)
               .when(Boolean(q.ahead), (e) => e.child("▲"))
               .child(`${p}%`),
+          );
+      }),
+    );
+}
+
+/** Horizontal row of gas-tank dual quota rings (outer = 5h remaining, inner = 7d remaining), logo in center, `5h% / 7d%` and reset times below. */
+export function QuotaRings(providers, { id = "quota-rings" } = {}) {
+  const k = tokens();
+  if (!providers?.length) return null;
+  const remTone = (rem, base) => (rem <= 5 ? k.destructive : rem <= 20 ? k.warning : base);
+  return h_flex()
+    .id(id)
+    .w_full()
+    .justify_between()
+    .gap(4)
+    .children(
+      providers.map((p) => {
+        const has5h = p.p5h != null;
+        const has7d = p.p7d != null;
+        const hasAny = has5h || has7d;
+        const rem5h = has5h ? Math.max(0, Math.min(100, 100 - p.p5h)) : null;
+        const rem7d = has7d ? Math.max(0, Math.min(100, 100 - p.p7d)) : null;
+        const baseColor = p.color ?? k.ring;
+        const outerColor = has5h ? remTone(rem5h, baseColor) : k.mutedFg;
+        const innerColor = has7d ? remTone(rem7d, alpha(baseColor, 0.72)) : k.mutedFg;
+        const subLabel = hasAny
+          ? `${has5h ? `${Math.round(rem5h)}%` : "–"} / ${has7d ? `${Math.round(rem7d)}%` : "–"}`
+          : "– / –";
+        const now = Date.now();
+        const fmtReset = (ts) => (ts && ts > now ? dur(ts - now) : "–");
+        const hasReset = (p.resets5h && p.resets5h > now) || (p.resets7d && p.resets7d > now);
+        const resetLabel = hasReset ? `${fmtReset(p.resets5h)} / ${fmtReset(p.resets7d)}` : "";
+        const parts = [];
+        if (p.freeLimit != null && p.freeRemaining != null) {
+          const left = p.resets5h && p.resets5h > now ? ` (resets in ${dur(p.resets5h - now)})` : "";
+          parts.push(`Daily free requests: ${p.freeRemaining} / ${p.freeLimit} left (${Math.round(rem5h)}%)${left}`);
+        } else {
+          if (has5h) {
+            const left5 = p.resets5h ? ` (resets in ${dur(p.resets5h - now)})` : "";
+            parts.push(`5h: ${Math.round(rem5h)}% left${left5}`);
+          }
+          if (has7d) {
+            const left7 = p.resets7d ? ` (resets in ${dur(p.resets7d - now)})` : "";
+            parts.push(`7d: ${Math.round(rem7d)}% left${left7}`);
+          }
+        }
+        const tip = parts.length ? `${p.name} · ${parts.join(", ")}` : `${p.name} · No local quota data`;
+        const center = Icon(p.icon ?? "circle", { size: 13, color: hasAny ? baseColor : k.mutedFg });
+        return v_flex()
+          .id(`${id}-${p.key}`)
+          .flex_1()
+          .min_w(0)
+          .items_center()
+          .gap(2)
+          .tooltip(tip)
+          .child(
+            DualRing(has5h ? rem5h / 100 : 0, has7d ? rem7d / 100 : 0, {
+              size: 44,
+              outerStroke: 3.5,
+              innerStroke: 3.5,
+              outerColor,
+              innerColor,
+              center,
+            }),
+          )
+          .child(div().text_size(10).font_family("JetBrains Mono").text_color(hasAny ? alpha(k.foreground, 0.85) : k.mutedFg).child(subLabel))
+          .when(Boolean(resetLabel), (e) =>
+            e.child(div().text_size(9.5).font_family("JetBrains Mono").text_color(alpha(k.foreground, 0.55)).child(resetLabel)),
           );
       }),
     );
